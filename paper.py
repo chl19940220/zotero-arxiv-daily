@@ -12,126 +12,139 @@ import tiktoken
 from contextlib import ExitStack
 
 
-
 class ArxivPaper:
-    def __init__(self,paper:arxiv.Result):
+    def __init__(self, paper: arxiv.Result):
         self._paper = paper
         self.score = None
-    
+
     @property
     def title(self) -> str:
         return self._paper.title
-    
+
     @property
     def summary(self) -> str:
         return self._paper.summary
-    
+
     @property
     def authors(self) -> list[str]:
         return self._paper.authors
-    
+
     @cached_property
     def arxiv_id(self) -> str:
         return re.sub(r'v\d+$', '', self._paper.get_short_id())
-    
+
     @property
     def pdf_url(self) -> str:
         return self._paper.pdf_url
-    
+
     @cached_property
     def code_url(self) -> Optional[str]:
         s = requests.Session()
         retries = Retry(total=5, backoff_factor=0.1)
         s.mount('https://', HTTPAdapter(max_retries=retries))
         try:
-            paper_list = s.get(f'https://paperswithcode.com/api/v1/papers/?arxiv_id={self.arxiv_id}').json()
+            paper_list = s.get(
+                f'https://paperswithcode.com/api/v1/papers/?arxiv_id={self.arxiv_id}').json()
         except Exception as e:
             logger.debug(f'Error when searching {self.arxiv_id}: {e}')
             return None
 
-        if paper_list.get('count',0) == 0:
+        if paper_list.get('count', 0) == 0:
             return None
         paper_id = paper_list['results'][0]['id']
 
         try:
-            repo_list = s.get(f'https://paperswithcode.com/api/v1/papers/{paper_id}/repositories/').json()
+            repo_list = s.get(
+                f'https://paperswithcode.com/api/v1/papers/{paper_id}/repositories/').json()
         except Exception as e:
             logger.debug(f'Error when searching {self.arxiv_id}: {e}')
             return None
-        if repo_list.get('count',0) == 0:
+        if repo_list.get('count', 0) == 0:
             return None
         return repo_list['results'][0]['url']
-    
+
     @cached_property
-    def tex(self) -> dict[str,str]:
+    def tex(self) -> dict[str, str]:
         with ExitStack() as stack:
             tmpdirname = stack.enter_context(TemporaryDirectory())
             file = self._paper.download_source(dirpath=tmpdirname)
             try:
                 tar = stack.enter_context(tarfile.open(file))
             except tarfile.ReadError:
-                logger.debug(f"Failed to find main tex file of {self.arxiv_id}: Not a tar file.")
+                logger.debug(
+                    f"Failed to find main tex file of {self.arxiv_id}: Not a tar file.")
                 return None
- 
+
             tex_files = [f for f in tar.getnames() if f.endswith('.tex')]
             if len(tex_files) == 0:
-                logger.debug(f"Failed to find main tex file of {self.arxiv_id}: No tex file.")
+                logger.debug(
+                    f"Failed to find main tex file of {self.arxiv_id}: No tex file.")
                 return None
-            
+
             bbl_file = [f for f in tar.getnames() if f.endswith('.bbl')]
-            match len(bbl_file) :
+            match len(bbl_file):
                 case 0:
                     if len(tex_files) > 1:
-                        logger.debug(f"Cannot find main tex file of {self.arxiv_id} from bbl: There are multiple tex files while no bbl file.")
+                        logger.debug(
+                            f"Cannot find main tex file of {self.arxiv_id} from bbl: There are multiple tex files while no bbl file.")
                         main_tex = None
                     else:
                         main_tex = tex_files[0]
                 case 1:
-                    main_name = bbl_file[0].replace('.bbl','')
+                    main_name = bbl_file[0].replace('.bbl', '')
                     main_tex = f"{main_name}.tex"
                     if main_tex not in tex_files:
-                        logger.debug(f"Cannot find main tex file of {self.arxiv_id} from bbl: The bbl file does not match any tex file.")
+                        logger.debug(
+                            f"Cannot find main tex file of {self.arxiv_id} from bbl: The bbl file does not match any tex file.")
                         main_tex = None
                 case _:
-                    logger.debug(f"Cannot find main tex file of {self.arxiv_id} from bbl: There are multiple bbl files.")
+                    logger.debug(
+                        f"Cannot find main tex file of {self.arxiv_id} from bbl: There are multiple bbl files.")
                     main_tex = None
             if main_tex is None:
-                logger.debug(f"Trying to choose tex file containing the document block as main tex file of {self.arxiv_id}")
-            #read all tex files
+                logger.debug(
+                    f"Trying to choose tex file containing the document block as main tex file of {self.arxiv_id}")
+            # read all tex files
             file_contents = {}
             for t in tex_files:
                 f = tar.extractfile(t)
-                content = f.read().decode('utf-8',errors='ignore')
-                #remove comments
+                content = f.read().decode('utf-8', errors='ignore')
+                # remove comments
                 content = re.sub(r'%.*\n', '\n', content)
-                content = re.sub(r'\\begin{comment}.*?\\end{comment}', '', content, flags=re.DOTALL)
-                content = re.sub(r'\\iffalse.*?\\fi', '', content, flags=re.DOTALL)
-                #remove redundant \n
+                content = re.sub(
+                    r'\\begin{comment}.*?\\end{comment}', '', content, flags=re.DOTALL)
+                content = re.sub(r'\\iffalse.*?\\fi', '',
+                                 content, flags=re.DOTALL)
+                # remove redundant \n
                 content = re.sub(r'\n+', '\n', content)
                 content = re.sub(r'\\\\', '', content)
-                #remove consecutive spaces
+                # remove consecutive spaces
                 content = re.sub(r'[ \t\r\f]{3,}', ' ', content)
                 if main_tex is None and re.search(r'\\begin\{document\}', content):
                     main_tex = t
-                    logger.debug(f"Choose {t} as main tex file of {self.arxiv_id}")
+                    logger.debug(
+                        f"Choose {t} as main tex file of {self.arxiv_id}")
                 file_contents[t] = content
-            
+
             if main_tex is not None:
-                main_source:str = file_contents[main_tex]
-                #find and replace all included sub-files
-                include_files = re.findall(r'\\input\{(.+?)\}', main_source) + re.findall(r'\\include\{(.+?)\}', main_source)
+                main_source: str = file_contents[main_tex]
+                # find and replace all included sub-files
+                include_files = re.findall(
+                    r'\\input\{(.+?)\}', main_source) + re.findall(r'\\include\{(.+?)\}', main_source)
                 for f in include_files:
                     if not f.endswith('.tex'):
                         file_name = f + '.tex'
                     else:
                         file_name = f
-                    main_source = main_source.replace(f'\\input{{{f}}}', file_contents.get(file_name, ''))
+                    main_source = main_source.replace(
+                        f'\\input{{{f}}}', file_contents.get(file_name, ''))
                 file_contents["all"] = main_source
             else:
-                logger.debug(f"Failed to find main tex file of {self.arxiv_id}: No tex file containing the document block.")
+                logger.debug(
+                    f"Failed to find main tex file of {self.arxiv_id}: No tex file containing the document block.")
                 file_contents["all"] = None
         return file_contents
-    
+
     @cached_property
     def tldr(self) -> str:
         introduction = ""
@@ -140,26 +153,31 @@ class ArxivPaper:
             content = self.tex.get("all")
             if content is None:
                 content = "\n".join(self.tex.values())
-            #remove cite
+            # remove cite
             content = re.sub(r'~?\\cite.?\{.*?\}', '', content)
-            #remove figure
-            content = re.sub(r'\\begin\{figure\}.*?\\end\{figure\}', '', content, flags=re.DOTALL)
-            #remove table
-            content = re.sub(r'\\begin\{table\}.*?\\end\{table\}', '', content, flags=re.DOTALL)
-            #find introduction and conclusion
+            # remove figure
+            content = re.sub(
+                r'\\begin\{figure\}.*?\\end\{figure\}', '', content, flags=re.DOTALL)
+            # remove table
+            content = re.sub(
+                r'\\begin\{table\}.*?\\end\{table\}', '', content, flags=re.DOTALL)
+            # find introduction and conclusion
             # end word can be \section or \end{document} or \bibliography or \appendix
-            match = re.search(r'\\section\{Introduction\}.*?(\\section|\\end\{document\}|\\bibliography|\\appendix|$)', content, flags=re.DOTALL)
+            match = re.search(
+                r'\\section\{Introduction\}.*?(\\section|\\end\{document\}|\\bibliography|\\appendix|$)', content, flags=re.DOTALL)
             if match:
                 introduction = match.group(0)
-            match = re.search(r'\\section\{Conclusion\}.*?(\\section|\\end\{document\}|\\bibliography|\\appendix|$)', content, flags=re.DOTALL)
+            match = re.search(
+                r'\\section\{Conclusion\}.*?(\\section|\\end\{document\}|\\bibliography|\\appendix|$)', content, flags=re.DOTALL)
             if match:
                 conclusion = match.group(0)
         llm = get_llm()
-        prompt = """根据一篇论文的标题、摘要、引言以及结论（如果有的话），以 LaTeX 格式生成一句中文的 TLDR 总结。        
-        \\title{__TITLE__}
-        \\begin{abstract}__ABSTRACT__\\end{abstract}
-        __INTRODUCTION__
-        __CONCLUSION__
+        prompt = """根据一篇论文的标题、摘要、引言以及结论（如果有的话），生成一句纯文本的 __LANG__ TLDR 总结。请确保只返回总结内容，不要包含任何 LaTeX 或其他格式化命令。
+        
+        论文标题: __TITLE__
+        摘要: __ABSTRACT__
+        引言: __INTRODUCTION__
+        结论: __CONCLUSION__
         """
         prompt = prompt.replace('__LANG__', llm.lang)
         prompt = prompt.replace('__TITLE__', self.title)
@@ -172,12 +190,12 @@ class ArxivPaper:
         prompt_tokens = enc.encode(prompt)
         prompt_tokens = prompt_tokens[:4000]  # truncate to 4000 tokens
         prompt = enc.decode(prompt_tokens)
-        
+
         tldr = llm.generate(
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一位科研助手，能够完美地总结论文内容，并向用户提供论文的核心思想。",
+                    "content": "你是一位科研助手，能够完美地总结论文内容，并向用户提供论文的核心思想。你的总结必须是所指定语言的单个句子。总结必须是纯文本。请勿在回应中使用任何 LaTeX、Markdown、HTML 或任何其他标记语言。请勿包含 \\documentclass、\\usepackage、\\begin{tcolorbox}、\\textbf 或类似的格式命令。",
                 },
                 {"role": "user", "content": prompt},
             ]
@@ -190,14 +208,17 @@ class ArxivPaper:
             content = self.tex.get("all")
             if content is None:
                 content = "\n".join(self.tex.values())
-            #search for affiliations
-            possible_regions = [r'\\author.*?\\maketitle',r'\\begin{document}.*?\\begin{abstract}']
-            matches = [re.search(p, content, flags=re.DOTALL) for p in possible_regions]
+            # search for affiliations
+            possible_regions = [r'\\author.*?\\maketitle',
+                                r'\\begin{document}.*?\\begin{abstract}']
+            matches = [re.search(p, content, flags=re.DOTALL)
+                       for p in possible_regions]
             match = next((m for m in matches if m), None)
             if match:
                 information_region = match.group(0)
             else:
-                logger.debug(f"Failed to extract affiliations of {self.arxiv_id}: No author information found.")
+                logger.debug(
+                    f"Failed to extract affiliations of {self.arxiv_id}: No author information found.")
                 return None
             prompt = f"Given the author information of a paper in latex format, extract the affiliations of the authors in a python list format, which is sorted by the author order. If there is no affiliation found, return an empty list '[]'. Following is the author information:\n{information_region}"
             # use gpt-4o tokenizer for estimation
@@ -217,11 +238,13 @@ class ArxivPaper:
             )
 
             try:
-                affiliations = re.search(r'\[.*?\]', affiliations, flags=re.DOTALL).group(0)
+                affiliations = re.search(
+                    r'\[.*?\]', affiliations, flags=re.DOTALL).group(0)
                 affiliations = eval(affiliations)
                 affiliations = list(set(affiliations))
                 affiliations = [str(a) for a in affiliations]
             except Exception as e:
-                logger.debug(f"Failed to extract affiliations of {self.arxiv_id}: {e}")
+                logger.debug(
+                    f"Failed to extract affiliations of {self.arxiv_id}: {e}")
                 return None
             return affiliations

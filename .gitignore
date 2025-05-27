@@ -15,3 +15,7 @@ test.ipynb
 logs
 models
 test-compose.yml
+# SpecStory explanation file
+.specstory/.what-is-this.md
+
+.specstory/**
