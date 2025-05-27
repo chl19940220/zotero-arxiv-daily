@@ -220,7 +220,7 @@ class ArxivPaper:
                 logger.debug(
                     f"Failed to extract affiliations of {self.arxiv_id}: No author information found.")
                 return None
-            prompt = f"Given the author information of a paper in latex format, extract the affiliations of the authors in a python list format, which is sorted by the author order. If there is no affiliation found, return an empty list '[]'. Following is the author information:\n{information_region}"
+            prompt = f"请根据以下 LaTeX 格式的论文作者信息，提取作者的单位，并以 Python列表的格式返回，列表应按作者顺序排序。如果未找到单位信息，请返回空列表 '[]'。作者信息如下：\n{information_region}"
             # use gpt-4o tokenizer for estimation
             enc = tiktoken.encoding_for_model("gpt-4o")
             prompt_tokens = enc.encode(prompt)
@@ -231,7 +231,7 @@ class ArxivPaper:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an assistant who perfectly extracts affiliations of authors from the author information of a paper. You should return a python list of affiliations sorted by the author order, like ['TsingHua University','Peking University']. If an affiliation is consisted of multi-level affiliations, like 'Department of Computer Science, TsingHua University', you should return the top-level affiliation 'TsingHua University' only. Do not contain duplicated affiliations. If there is no affiliation found, you should return an empty list [ ]. You should only return the final list of affiliations, and do not return any intermediate results.",
+                        "content": "你是一位能够完美从论文作者信息中提取作者单位的助手。你应该返回一个按作者顺序列出的 Python 单位列表，例如 ['TsingHua University','Peking University']。如果一个单位包含多层级信息，例如 'Department of Computer Science, TsingHua University'，你应仅返回顶级单位 'TsingHua University'。不要包含重复的单位。如果没有找到单位信息，则返回空列表 []。你只需要返回最终的单位列表，不要返回任何中间结果。",
                     },
                     {"role": "user", "content": prompt},
                 ]
