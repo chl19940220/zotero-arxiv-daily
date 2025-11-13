@@ -80,6 +80,12 @@ class ArxivPaper:
             tmpdirname = stack.enter_context(TemporaryDirectory())
             # file = self._paper.download_source(dirpath=tmpdirname)
             try:
+                # 确保 pdf_url 已正确设置，否则 arxiv 库在下载源码时会出错
+                if getattr(self._paper, "pdf_url", None) is None:
+                    self._paper.pdf_url = self.pdf_url
+                if self._paper.pdf_url is None:
+                    logger.warning(f"PDF url for {self.arxiv_id} is missing, skip source download.")
+                    return None
                 # 尝试下载源文件
                 file = self._paper.download_source(dirpath=tmpdirname)
             except HTTPError as e:

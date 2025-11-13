@@ -135,7 +135,7 @@ def render_email(papers: list[ArxivPaper]):
             authors = ', '.join(author_list)
         else:
             authors = ', '.join(author_list[:3] + ['...'] + author_list[-2:])
-        if p.pdf_url is not None and p.affiliations is not None:
+        if p.affiliations is not None:
             affiliations = p.affiliations[:5]
             affiliations = ', '.join(affiliations)
             if len(p.affiliations) > 5:
@@ -144,6 +144,7 @@ def render_email(papers: list[ArxivPaper]):
             affiliations = 'Unknown Affiliation'
         parts.append(get_block_html(p.title, authors, rate,
                      p.arxiv_id, p.tldr, p.pdf_url, p.code_url, affiliations))
+        time.sleep(10)
 
     content = '<br>' + '</br><br>'.join(parts) + '</br>'
     return framework.replace('__CONTENT__', content)
